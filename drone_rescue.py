@@ -29,13 +29,11 @@ class DroneRescueEnv:
             wind_prob = 0.3
             max_steps = 75
 
-
         """
         Battery Configuration:
         
         If the student ID ends with an even digit then maximum battery = 10 units 
         else if the student ID ends with an odd digit then maximum battery = 15 units.
-        
         """
         if last_digit % 2 == 0:
             max_battery = 10
@@ -92,22 +90,32 @@ class DroneRescueEnv:
         self.steps = 0
         self.rescued = {pos: False for pos in self.rescue_positions}
         self.visited_states = set()
+
         return self._get_state()
 
     def _get_state(self):
         """Return the current state representation."""
-        return (self.pos, self.battery, tuple(self.rescued.values()))
+        return self.pos, self.battery, tuple(self.rescued.values())
 
     def valid_actions(self):
         """Return the list of valid actions."""
         return ['UP','DOWN','LEFT','RIGHT']
 
-    def step(self, action):
-        """Take an action and return the new state, reward, and done flag."""
+    def execute_action(self, action):
+        """
+        Take an action and return the new state, reward, and done flag.
+        The step function is responsible for Drone flying in real environment
+        """
+        # Update position based on action and environment dynamics
         r, c = self.pos
-        # Step penalty
+
+        # Step penalty as with each action taken, the drone consumes battery and time.
         reward = -1
+
+        # Initialize a done flag to False, it will be set to True if the episode ends due to rescue completion or max steps reached.
         done = False
+
+        # Increment step count
         self.steps += 1
 
         # Battery cost
@@ -164,7 +172,7 @@ class DroneRescueEnv:
 
         # Termination
         if all(self.rescued.values()):
-            reward += 500
+            reward = reward + 500
             done = True
         elif self.steps >= self.max_steps:
             done = True
@@ -195,6 +203,7 @@ class ValueIterationSolver:
         self.policy = {}
 
     def run(self):
+        """Run value iteration until convergence."""
         iteration = 0
         while True:
             delta = 0
@@ -206,9 +215,11 @@ class ValueIterationSolver:
             if delta < self.theta:
                 break
         self._extract_policy()
-        print(f"Converged after {iteration} iterations with delta={delta:.6f}")
+        return iteration, delta
+
 
     def _enumerate_states(self):
+        """Enumerate all possible states in the environment and return as a list."""
         states = []
         positions = [
             (r, c)
@@ -225,16 +236,20 @@ class ValueIterationSolver:
         return states
 
     def _best_value(self, state):
+        """Calculate the best value for a given state by evaluating all possible actions."""
         best = float('-inf')
 
         if all(state[2]):
             return 0
         for a in self.env.valid_actions():
-            val = self._expected_return(state,a)
+            val = self._evaluate_action(state,a)
             best = max(best,val)
         return best
 
-    def _expected_return(self, state, action):
+    def _evaluate_action(self, state, action):
+        """Calculate the expected return for taking an action in a given state.
+        This enables the drone to mentally imagine future rewards before deciding"""
+
 
         pos, battery, rescued = state
 
@@ -311,12 +326,11 @@ class ValueIterationSolver:
     def _extract_policy(self):
         """Extract the optimal policy from the value function."""
 
-
         for state in self._enumerate_states():
             best_action = None
             best_val = float('-inf')
             for a in self.env.valid_actions():
-                val = self._expected_return(state,a)
+                val = self._evaluate_action(state,a)
                 if val > best_val:
                     best_val = val
                     best_action = a
@@ -324,12 +338,20 @@ class ValueIterationSolver:
 
 
 if __name__ == "__main__":
+
     student_id = input("Enter your student ID: ")
+
     env = DroneRescueEnv(student_id)
     env.render()
 
+    """ Value Iteration repeatedly updates the value of each state using the Bellman Optimality Equation until convergence.
+    Policy Iteration has two separate phases: Policy Evaluation and Policy Improvement. 
+    
+    Here in this case we have chosen Value Iteration as it is more straightforward to implement 
+    and often converges faster for smaller state spaces like our grid environment."""
+
     solver = ValueIterationSolver(env)
-    solver.run()
+    iteration, delta =  solver.run()
 
     # Simulate following the optimal policy
     state = env.reset()
@@ -338,12 +360,13 @@ if __name__ == "__main__":
 
     while not done:
         action = solver.policy[state]
-        next_state, reward, done = env.step(action)
+        next_state, reward, done = env.execute_action(action)
         total_reward += reward
         state = next_state
         env.render()
 
     print("\nFinal Result:")
+    print(f"Converged after {iteration} iterations with delta={delta:.6f}")
     print("Total Reward Collected:", total_reward)
     print("Rescue Status:", env.rescued)
     print("Battery Remaining:", env.battery)
