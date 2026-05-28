@@ -61,7 +61,7 @@ class DroneRescueEnv:
         self.start = (0,0)
         self.grid[0][0] = 'S'
 
-        # Random placements (for demo; you can fix deterministic positions if required)
+        # Random placements
         self.rescue_positions = self._place('R', rescue_targets)
         self.charging_positions = self._place('C', charging_stations)
         self.danger_positions = self._place('D', danger_zones)
