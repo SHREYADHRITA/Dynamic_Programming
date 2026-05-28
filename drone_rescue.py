@@ -52,6 +52,7 @@ class DroneRescueEnv:
         C - Charging station 
         W - Wind zone 
         X - Blocked cell / obstacle 
+        A - Start position (agent's current location)
         """
         self.max_battery = max_battery
         self.wind_prob = wind_prob
@@ -72,6 +73,7 @@ class DroneRescueEnv:
         self.reset()
 
     def _place(self, symbol, count):
+        """ Helper function to randomly place symbols in the grid. """
         placed = []
         while len(placed) < count:
             r, c = random.randint(0,self.rows-1), random.randint(0,self.cols-1)
@@ -81,20 +83,29 @@ class DroneRescueEnv:
         return placed
 
     def reset(self):
+        """
+        Reset the environment to the initial state.
+        :return: The current state of the environment after reset
+        """
         self.pos = self.start
         self.battery = self.max_battery
         self.steps = 0
         self.rescued = {pos: False for pos in self.rescue_positions}
+        self.visited_states = set()
         return self._get_state()
 
     def _get_state(self):
+        """Return the current state representation."""
         return (self.pos, self.battery, tuple(self.rescued.values()))
 
     def valid_actions(self):
-        return ['UP','DOWN','LEFT','RIGHT','HOVER']
+        """Return the list of valid actions."""
+        return ['UP','DOWN','LEFT','RIGHT']
 
     def step(self, action):
+        """Take an action and return the new state, reward, and done flag."""
         r, c = self.pos
+        # Step penalty
         reward = -1
         done = False
         self.steps += 1
@@ -102,10 +113,12 @@ class DroneRescueEnv:
         # Battery cost
         self.battery -= 1
         if self.battery <= 0:
+            """If the battery is depleted, the drone cannot move and receives a large negative reward."""
             return self._get_state(), -20, True
 
         # Wind disturbance
         if self.grid[r][c] == 'W' and action != 'HOVER':
+            """In a wind zone, there's a chance the drone's intended action is overridden by a random movement."""
             if random.random() < self.wind_prob:
                 action = random.choice(['UP','DOWN','LEFT','RIGHT'])
 
@@ -116,24 +129,33 @@ class DroneRescueEnv:
         elif action == 'RIGHT': c += 1
         elif action == 'HOVER':
             if self.grid[r][c] == 'C':
+                """ Hovering on a charging station restores some battery. """
                 self.battery = min(self.max_battery, self.battery+2)
 
         # Boundary check
         if not (0 <= r < self.rows and 0 <= c < self.cols):
-            r, c = self.pos  # stay in place
+            """ If the drone tries to move outside the grid, it stays in place """
+            r, c = self.pos
 
         # Blocked cell check
         if self.grid[r][c] == 'X':
-            r, c = self.pos  # stay in place
+            """ If the drone tries to move into a blocked cell, it stays in place """
+            r, c = self.pos
 
+        """ Update position after movement checks """
         self.pos = (r,c)
+
+        """ State visitation penalty to encourage exploration. """
+        current_state = self._get_state()
+        if current_state in self.visited_states:
+            reward -= 10
+        self.visited_states.add(current_state)
 
         # Rewards
         cell = self.grid[r][c]
         if cell == 'R' and not self.rescued[(r,c)]:
             reward += 20
             self.rescued[(r,c)] = True
-            self.grid[r][c] = 'F'
         elif cell == 'D':
             reward += -10
         elif cell == 'C':
@@ -141,27 +163,188 @@ class DroneRescueEnv:
             self.battery = self.max_battery
 
         # Termination
-        if all(self.rescued.values()) or self.steps >= self.max_steps:
+        if all(self.rescued.values()):
+            reward += 500
+            done = True
+        elif self.steps >= self.max_steps:
             done = True
 
         return self._get_state(), reward, done
 
     def render(self):
+        """Print the current state of the grid and drone status."""
         for r in range(self.rows):
             row = ""
             for c in range(self.cols):
                 if (r,c) == self.pos:
-                    row += "0 "
+                    row += "A "  # Agent's current position
                 else:
                     row += self.grid[r][c] + " "
             print(row)
         print(f"Battery: {self.battery}, Rescued: {self.rescued}, Steps: {self.steps}")
 
 
-# -----------------------------
-# Example Run
-# -----------------------------
+class ValueIterationSolver:
+    """Solver for the Drone Rescue Environment using Value Iteration."""
+
+    def __init__(self, env, gamma=0.85, theta=1e-3):
+        self.env = env
+        self.gamma = gamma
+        self.theta = theta
+        self.V = defaultdict(float)
+        self.policy = {}
+
+    def run(self):
+        iteration = 0
+        while True:
+            delta = 0
+            for state in self._enumerate_states():
+                v = self.V[state]
+                self.V[state] = self._best_value(state)
+                delta = max(delta, abs(v - self.V[state]))
+            iteration += 1
+            if delta < self.theta:
+                break
+        self._extract_policy()
+        print(f"Converged after {iteration} iterations with delta={delta:.6f}")
+
+    def _enumerate_states(self):
+        states = []
+        positions = [
+            (r, c)
+            for r in range(self.env.rows)
+            for c in range(self.env.cols)
+            if (r, c) not in self.env.blocked_positions
+        ]
+        batteries = range(1, self.env.max_battery+1)
+        rescue_statuses = list(itertools.product([False,True], repeat=len(self.env.rescue_positions)))
+        for pos in positions:
+            for b in batteries:
+                for rs in rescue_statuses:
+                    states.append((pos,b,rs))
+        return states
+
+    def _best_value(self, state):
+        best = float('-inf')
+
+        if all(state[2]):
+            return 0
+        for a in self.env.valid_actions():
+            val = self._expected_return(state,a)
+            best = max(best,val)
+        return best
+
+    def _expected_return(self, state, action):
+
+        pos, battery, rescued = state
+
+        if battery <= 0:
+            return -100
+
+        r, c = pos # updating row number and column number of the drone
+
+        # Simulate movement
+        nr, nc = r, c
+
+        if action == 'UP':
+            nr -= 1
+        elif action == 'DOWN':
+            nr += 1
+        elif action == 'LEFT':
+            nc -= 1
+        elif action == 'RIGHT':
+            nc += 1
+
+        # Boundary check
+        if not (0 <= nr < self.env.rows and 0 <= nc < self.env.cols):
+            nr, nc = r, c
+
+        # Blocked cell check
+        if (nr, nc) in self.env.blocked_positions:
+            nr, nc = r, c
+
+        battery -= 1
+
+        reward = -1
+
+        rescued_dict = dict(zip(self.env.rescue_positions, rescued))
+
+        cell = self.env.grid[nr][nc]
+
+
+        # Rescue reward
+        if cell == 'R' and not rescued_dict[(nr, nc)]:
+            reward += 20
+            rescued_dict[(nr, nc)] = True
+
+        # Danger penalty
+        elif cell == 'D':
+            reward -= 10
+
+        # Charging station
+        elif cell == 'C':
+
+            reward += 5
+
+            # Recharge only if battery is sufficiently low
+            if battery < self.env.max_battery - 2:
+                battery = self.env.max_battery
+
+        # Penalize staying in same state
+        if (nr, nc) == pos:
+            reward -= 5
+
+        # Battery depletion
+        if battery <= 0:
+            reward -= 20
+            return reward
+
+        # Mission complete
+        if all(rescued_dict.values()):
+            reward += 500
+            return reward
+
+        next_state = ((nr, nc), battery, tuple(rescued_dict.values()))
+
+        return reward + self.gamma * self.V[next_state]
+
+    def _extract_policy(self):
+        """Extract the optimal policy from the value function."""
+
+
+        for state in self._enumerate_states():
+            best_action = None
+            best_val = float('-inf')
+            for a in self.env.valid_actions():
+                val = self._expected_return(state,a)
+                if val > best_val:
+                    best_val = val
+                    best_action = a
+            self.policy[state] = best_action
+
+
 if __name__ == "__main__":
     student_id = input("Enter your student ID: ")
     env = DroneRescueEnv(student_id)
     env.render()
+
+    solver = ValueIterationSolver(env)
+    solver.run()
+
+    # Simulate following the optimal policy
+    state = env.reset()
+    done = False
+    total_reward = 0
+
+    while not done:
+        action = solver.policy[state]
+        next_state, reward, done = env.step(action)
+        total_reward += reward
+        state = next_state
+        env.render()
+
+    print("\nFinal Result:")
+    print("Total Reward Collected:", total_reward)
+    print("Rescue Status:", env.rescued)
+    print("Battery Remaining:", env.battery)
+    print("Steps Taken:", env.steps)
