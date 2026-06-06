@@ -31,7 +31,7 @@ class DroneRescueEnv:
 
         """
         Battery Configuration:
-        
+
         If the student ID ends with an even digit then maximum battery = 10 units 
         else if the student ID ends with an odd digit then maximum battery = 15 units.
         """
@@ -42,7 +42,7 @@ class DroneRescueEnv:
 
         """
         Assign cell types in the grid:
-        
+
         S - Start position
         F - Free/Safe cell 
         D - Dangerous zone
@@ -58,7 +58,7 @@ class DroneRescueEnv:
         self.grid = [['F' for _ in range(self.cols)] for _ in range(self.rows)]
 
         # Place start
-        self.start = (0,0)
+        self.start = (0, 0)
         self.grid[0][0] = 'S'
 
         # Random placements
@@ -74,10 +74,10 @@ class DroneRescueEnv:
         """ Helper function to randomly place symbols in the grid. """
         placed = []
         while len(placed) < count:
-            r, c = random.randint(0,self.rows-1), random.randint(0,self.cols-1)
+            r, c = random.randint(0, self.rows - 1), random.randint(0, self.cols - 1)
             if self.grid[r][c] == 'F':
                 self.grid[r][c] = symbol
-                placed.append((r,c))
+                placed.append((r, c))
         return placed
 
     def reset(self):
@@ -99,7 +99,7 @@ class DroneRescueEnv:
 
     def valid_actions(self):
         """Return the list of valid actions."""
-        return ['UP','DOWN','LEFT','RIGHT']
+        return ['UP', 'DOWN', 'LEFT', 'RIGHT']
 
     def execute_action(self, action):
         """
@@ -128,17 +128,21 @@ class DroneRescueEnv:
         if self.grid[r][c] == 'W' and action != 'HOVER':
             """In a wind zone, there's a chance the drone's intended action is overridden by a random movement."""
             if random.random() < self.wind_prob:
-                action = random.choice(['UP','DOWN','LEFT','RIGHT'])
+                action = random.choice(['UP', 'DOWN', 'LEFT', 'RIGHT'])
 
         # Movement
-        if action == 'UP': r -= 1
-        elif action == 'DOWN': r += 1
-        elif action == 'LEFT': c -= 1
-        elif action == 'RIGHT': c += 1
+        if action == 'UP':
+            r -= 1
+        elif action == 'DOWN':
+            r += 1
+        elif action == 'LEFT':
+            c -= 1
+        elif action == 'RIGHT':
+            c += 1
         elif action == 'HOVER':
             if self.grid[r][c] == 'C':
                 """ Hovering on a charging station restores some battery. """
-                self.battery = min(self.max_battery, self.battery+2)
+                self.battery = min(self.max_battery, self.battery + 2)
 
         # Boundary check
         if not (0 <= r < self.rows and 0 <= c < self.cols):
@@ -151,7 +155,7 @@ class DroneRescueEnv:
             r, c = self.pos
 
         """ Update position after movement checks """
-        self.pos = (r,c)
+        self.pos = (r, c)
 
         """ State visitation penalty to encourage exploration. """
         current_state = self._get_state()
@@ -161,9 +165,9 @@ class DroneRescueEnv:
 
         # Rewards
         cell = self.grid[r][c]
-        if cell == 'R' and not self.rescued[(r,c)]:
+        if cell == 'R' and not self.rescued[(r, c)]:
             reward += 20
-            self.rescued[(r,c)] = True
+            self.rescued[(r, c)] = True
         elif cell == 'D':
             reward += -10
         elif cell == 'C':
@@ -184,7 +188,7 @@ class DroneRescueEnv:
         for r in range(self.rows):
             row = ""
             for c in range(self.cols):
-                if (r,c) == self.pos:
+                if (r, c) == self.pos:
                     row += "A "  # Agent's current position
                 else:
                     row += self.grid[r][c] + " "
